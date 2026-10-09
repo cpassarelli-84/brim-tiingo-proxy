@@ -29,12 +29,16 @@
 //   ...}]), so every consumer on the site (proposal engine, the canonical
 //   chart, the Innovation page compare, the Portfolio Simulator) gets the fix
 //   with no code change. A header says which method produced the series:
-//       X-BRIM-Price-Source: nav-plus-distributions | tiingo
+//       X-BRIM-Price-Source: nav-plus-distributions | tiingo | money-market
 //
-//   Money market funds stay on Tiingo: Yahoo carries no distributions for
-//   them (SWVXX shows none) and Tiingo's are right. Stocks and ETFs stay on
-//   Tiingo, unchanged. If Yahoo fails, is sparse, or returns anything
-//   implausible, the fund falls back to Tiingo, exactly as before.
+//   Money market funds cannot be rebuilt this way: Yahoo carries no
+//   distributions for them (SWVXX shows none), and Tiingo's history starts in
+//   May 2021 and misses most dividends before 2025 (VMFXX 2023: Tiingo 0.43%,
+//   the fund paid about 5%). They still return Tiingo's series, but the header
+//   says 'money-market' so a consumer can model them on Treasury bills
+//   instead. Stocks and ETFs stay on Tiingo, unchanged. If Yahoo fails, is
+//   sparse, or returns anything implausible, a fund falls back to Tiingo,
+//   exactly as before.
 // ---------------------------------------------------------------------------
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
@@ -234,12 +238,15 @@ export default async function handler(req, res) {
     }
   }
 
+  // Yahoo's own label: a money market fund keeps Tiingo's series but is flagged.
+  const isMoneyMarket = !!(yres && yres.meta && yres.meta.instrumentType === 'MONEYMARKET');
+
   if (!upstream || body == null) { res.status(502).json({ detail: 'Upstream fetch failed' }); return; }
   // EOD prices change once a day — cache at Vercel's edge to slash Tiingo calls.
   if (upstream.ok) {
     res.setHeader('Cache-Control', 's-maxage=21600, stale-while-revalidate=86400');
   }
-  res.setHeader('X-BRIM-Price-Source', 'tiingo');
+  res.setHeader('X-BRIM-Price-Source', isMoneyMarket ? 'money-market' : 'tiingo');
   res.status(upstream.status)
      .setHeader('Content-Type', 'application/json')
      .send(body); // Tiingo's JSON, passed straight through
